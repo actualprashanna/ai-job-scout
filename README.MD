@@ -1,99 +1,61 @@
-AI Job Scout 🔍
+# AI Job Scout
 
-AI Job Scout is a full-stack job aggregation platform that uses Gemini AI to perform "dorking"—generating highly specific search queries to find real-time job listings across the web. It features an automated CV analyzer that scores your resume fit against job descriptions.
+An intelligent, full-stack career assistant powered by **Django REST Framework**, **React + Vite**, **Tailwind CSS**, and **Google's Gemini AI SDK**. 
 
-🚀 Features
+AI Job Scout transforms any raw job title, profession, or description into targeted global search queries, fetches real-time web job listings, and provides instant, percentage-based CV fit scoring with actionable strength-and-gap feedback.
 
-Universal Search: Search for any role globally using AI-optimized search dorks.
+---
 
-Gemini Dork Engine: Automatically transforms raw user input into targeted queries for platforms like LinkedIn, Indeed, Greenhouse, and Lever.
+## Features
 
-Live Web Fetcher: Real-time job retrieval without the need for expensive, paid APIs.
+* **Universal AI Search (Module 01):** Type any role worldwide (e.g., *Offshore Wind Technician*, *ICU Nurse*, *Python Developer*, *Barista*) or pick a quick industry category.
+* **Gemini Dork Engine (Module 02):** Automatically translates user input into high-conversion search dorks targeting LinkedIn, Merojob, JobsNepal, Greenhouse, and Lever.
+* **Live Job Board Fetcher:** Parses real web listings or provides direct career portal deep-links instantly.
+* **CV Fit Analyzer (Module 03):** Upload any candidate PDF CV and a target job description to get a **30% to 100% fit score**, key matching strengths, and missing skill gaps.
+* **Interactive Job Management:** Save and bookmark listings, filter results live by keyword, and sync job postings directly to the CV analyzer with a single click.
 
-CV Fit Analyzer: Upload your PDF CV to get an AI-powered match score (30–100%) with actionable feedback on strengths and gaps.
+---
 
-Job Dashboard: Save listings, filter results, and track application opportunities.
+## Tech Stack
 
-🛠 Tech Stack
+* **Backend:** Django 6.0, Django REST Framework, Google GenAI SDK (`google-genai`), `pypdf`, `python-dotenv`, `django-cors-headers`
+* **Frontend:** React, Vite, Tailwind CSS (v4), Lucide Icons
+* **AI Model:** Gemini 2.5 Flash
 
-Backend: Django, Django REST Framework (DRF), google-genai SDK, pypdf.
+---
 
-Frontend: React 18, Vite, Tailwind CSS (v4), Lucide Icons.
+## Project Structure
 
-Search Logic: Gemini 2.5 Flash for query optimization; DuckDuckGo HTML parsing for zero-cost web crawling.
-
-⚙️ Local Development Setup
-
-Prerequisites
-
-Python 3.11+
-
-Node.js (v18+)
-
-A Google Gemini API Key (Get one here)
-
-1. Backend Setup
-
-Clone the repository and enter the directory:
-
-git clone <your-repo-url>
-cd ai-job-scout
-
-
-Create and activate a virtual environment:
-
-python -m venv venv
-# On Windows:
-.\venv\Scripts\activate
-# On Mac/Linux:
-source venv/bin/activate
-
-
-Install dependencies:
-
-pip install django djangorestframework google-genai pypdf python-dotenv django-cors-headers
-
-
-Configure your .env file in the root directory:
-
-GEMINI_API_KEY=your_actual_api_key_here
-DEBUG=True
-
-
-Run the server:
-
-python manage.py runserver
-
-
-2. Frontend Setup
-
-Open a second terminal window and navigate to the frontend directory:
-
-cd frontend
-
-
-Install dependencies:
-
-npm install
-
-
-Start the development server:
-
-npm run dev
-
-
-📝 Usage
-
-Open http://localhost:5173 in your browser.
-
-Enter your desired job role in Module 01 and hit "Run Universal AI Search".
-
-Review the "Gemini Dork Engine" results and click any job listing.
-
-Upload your PDF CV in Module 03 to generate your fit score.
-
-Click "Save" on any job card to bookmark it to your local dashboard.
-
-🤝 Contributing
-
-Contributions are welcome! Please fork the repository and submit a pull request for any new features or bug fixes.
+```text
+ai-job-scout/
+│
+├── job_scout_backend/         # Django project settings & configs
+│   ├── __init__.py
+│   ├── asgi.py
+│   ├── settings.py
+│   ├── urls.py
+│   └── wsgi.py
+│
+├── scout_api/                 # Django app for AI and search logic
+│   ├── migrations/
+│   ├── admin.py
+│   ├── apps.py
+│   ├── models.py
+│   ├── services.py            # Gemini and live web search engine
+│   ├── tests.py
+│   ├── urls.py
+│   └── views.py
+│
+├── frontend/                  # React + Vite frontend application
+│   ├── src/
+│   │   ├── App.jsx
+│   │   ├── main.jsx
+│   │   └── index.css
+│   ├── package.json
+│   └── vite.config.js
+│
+├── .env                       # Environment variables (Secrets)
+├── .gitignore
+├── db.sqlite3                 # Local SQLite database
+├── manage.py                  # Django management script
+└── README.md
