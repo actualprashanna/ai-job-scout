@@ -20,7 +20,7 @@ AI Job Scout transforms any raw job title, profession, or description into targe
 
 * **Backend:** Django 6.0, Django REST Framework, Google GenAI SDK (`google-genai`), `pypdf`, `python-dotenv`, `django-cors-headers`
 * **Frontend:** React, Vite, Tailwind CSS (v4), Lucide Icons
-* **AI Model:** Gemini 2.5 Flash
+* **AI Model:** Gemini-3.5-flash-lite
 
 ---
 
