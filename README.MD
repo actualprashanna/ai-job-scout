@@ -1,4 +1,4 @@
-# 🎯 AI Job Scout V2
+# 🎯 AI Job Scout 
 > **Universal Gemini-Powered Web Aggregator & CV Matcher**
 
 AI Job Scout transforms how people find employment across every industry worldwide—from manual laborers and teachers to corporate lawyers and executives.
