@@ -11,6 +11,8 @@ from pypdf import PdfReader
 
 logger = logging.getLogger(__name__)
 
+# --- EXISTING CLASSES (Kept for compatibility and single-job analysis) ---
+
 class InputTransformer:
     """Transforms ANY job request into dynamic search dorks and queries using Gemini."""
 
@@ -61,7 +63,7 @@ class InputTransformer:
 
         try:
             response = self.client.models.generate_content(
-                model='gemini-3.5-flash-lite',
+                model='gemini-3.1-flash-lite',
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json"
@@ -92,25 +94,93 @@ class InputTransformer:
             }
         }
 
+class GoogleSearchService:
+    """Queries live web job listings using Custom Search API or robust web search fetcher."""
+    def __init__(self):
+        self.api_key = os.getenv("GOOGLE_SEARCH_API_KEY")
+        self.cx_id = os.getenv("GOOGLE_SEARCH_CX")
+
+    def search(self, query: str, num_results: int = 8, raw_role: str = "", location: str = "") -> list:
+        if self.api_key and self.cx_id:
+            try:
+                params = urllib.parse.urlencode({'key': self.api_key, 'cx': self.cx_id, 'q': query, 'num': min(num_results, 10)})
+                url = f"https://www.googleapis.com/customsearch/v1?{params}"
+                req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                with urllib.request.urlopen(req) as response:
+                    data = json.loads(response.read().decode())
+                results = [{'title': i.get('title'), 'link': i.get('link'), 'snippet': i.get('snippet')} for i in data.get('items', [])]
+                if results: return results
+            except Exception as e:
+                logger.error(f"Google Custom Search API error: {e}")
+
+        results = self._live_web_search(query, max_results=num_results)
+        
+        if not results:
+            clean_query = re.sub(r'site:[^\s]+', '', query).replace('"', '').strip()
+            clean_query = f"{clean_query} job vacancy hiring"
+            results = self._live_web_search(clean_query, max_results=num_results)
+
+        if not results:
+            results = self._generate_direct_job_board_links(raw_role or query, location)
+        return results
+
+    def _live_web_search(self, query: str, max_results: int = 8) -> list:
+        try:
+            data_bytes = urllib.parse.urlencode({'q': query}).encode('utf-8')
+            req = urllib.request.Request(
+                'https://html.duckduckgo.com/html/',
+                data=data_bytes,
+                headers={
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+                }
+            )
+            with urllib.request.urlopen(req, timeout=8) as response:
+                html = response.read().decode('utf-8', errors='ignore')
+
+            results = []
+            items = re.findall(r'<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', html, re.DOTALL)
+            snippets = re.findall(r'<a[^>]*class="result__snippet"[^>]*>(.*?)</a>', html, re.DOTALL)
+
+            for idx, (link, raw_title) in enumerate(items[:max_results]):
+                actual_link = urllib.parse.unquote(link.split('/uddg=')[1].split('&')[0]) if '/uddg=' in link else link
+                clean_title = unescape(re.sub(r'<[^>]+>', '', raw_title)).strip()
+                snippet_text = unescape(re.sub(r'<[^>]+>', '', snippets[idx])).strip() if idx < len(snippets) else ""
+                
+                if actual_link.startswith('http') and clean_title:
+                    results.append({"title": clean_title, "link": actual_link, "snippet": snippet_text or f"Listing on {actual_link}"})
+            return results
+        except Exception as e:
+            logger.error(f"Live web search error: {e}")
+            return []
+
+    def _generate_direct_job_board_links(self, role: str, location: str) -> list:
+        role_clean = role.replace('"', '').strip()
+        loc_clean = location.replace('"', '').strip() if location else ""
+        role_param = urllib.parse.quote(role_clean)
+        loc_param = urllib.parse.quote(loc_clean)
+
+        base = [
+            {"title": f"LinkedIn Jobs: {role_clean}", "link": f"https://www.linkedin.com/jobs/search/?keywords={role_param}&location={loc_param}", "snippet": "Explore live hiring listings on LinkedIn."},
+            {"title": f"Glassdoor: {role_clean}", "link": f"https://www.glassdoor.com/Job/jobs.htm?sc.keyword={role_param}", "snippet": "View salary ranges and active postings."},
+            {"title": f"Indeed: {role_clean}", "link": f"https://www.indeed.com/jobs?q={role_param}&l={loc_param}", "snippet": "Search thousands of active job vacancies."}
+        ]
+        if 'nepal' in loc_clean.lower() or 'kathmandu' in loc_clean.lower():
+            base.insert(0, {"title": f"Merojob: {role_clean}", "link": f"https://merojob.com/search/?q={role_param}", "snippet": "Top Nepalese career portal listings."})
+        return base
 
 class CVAnalyzer:
     """Parses PDF CVs and calculates a 30% to 100% fit score against job criteria."""
-
     def __init__(self):
         api_key = os.getenv("GEMINI_API_KEY")
-        if api_key:
-            self.client = genai.Client(api_key=api_key)
-        else:
-            self.client = None
+        self.client = genai.Client(api_key=api_key) if api_key else None
 
     def extract_text_from_pdf(self, pdf_file) -> str:
         """Extracts raw text from an uploaded PDF file."""
         try:
             reader = PdfReader(pdf_file)
-            text = ""
-            for page in reader.pages:
-                text += page.extract_text() or ""
-            return text
+            return "".join([page.extract_text() or "" for page in reader.pages])
         except Exception as e:
             logger.error(f"PDF extraction error: {e}")
             return ""
@@ -140,171 +210,95 @@ class CVAnalyzer:
             "recommendation": "string (Short action summary)"
         }}
         """
-
         if not self.client:
-            return {
-                "fit_percentage": 50,
-                "strengths": ["PDF successfully parsed"],
-                "gaps": ["GEMINI_API_KEY missing - running in fallback mode"],
-                "recommendation": "Configure Gemini API key for full AI analysis."
-            }
-
+            return {"fit_percentage": 50, "strengths": ["PDF successfully parsed"], "gaps": ["GEMINI_API_KEY missing - running in fallback mode"], "recommendation": "Configure Gemini API key for full AI analysis."}
+        
         try:
-            response = self.client.models.generate_content(
-                model='gemini-3.5-flash-lite',
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json"
-                )
+            res = self.client.models.generate_content(
+                model='gemini-3.1-flash-lite', 
+                contents=prompt, 
+                config=types.GenerateContentConfig(response_mime_type="application/json")
             )
-            return json.loads(response.text)
+            return json.loads(res.text)
         except Exception as e:
             logger.error(f"CV analysis error: {e}")
-            return {
-                "fit_percentage": 30,
-                "strengths": [],
-                "gaps": [f"Analysis error: {str(e)}"],
-                "recommendation": "Please try uploading a clearer PDF text document."
-            }
+            return {"fit_percentage": 30, "strengths": [], "gaps": [f"Analysis error: {str(e)}"], "recommendation": "Please try uploading a clearer PDF text document."}
 
+# --- NEW AUTO-SCOUT ENGINE (CV-First Workflow) ---
 
-class GoogleSearchService:
-    """Queries live web job listings using Custom Search API or robust web search fetcher."""
-
+class AutoJobScout:
+    """Reads CV, determines best roles, and searches the web automatically."""
     def __init__(self):
-        self.api_key = os.getenv("GOOGLE_SEARCH_API_KEY")
-        self.cx_id = os.getenv("GOOGLE_SEARCH_CX")
+        api_key = os.getenv("GEMINI_API_KEY")
+        self.client = genai.Client(api_key=api_key) if api_key else None
+        self.search_service = GoogleSearchService()
+        self.cv_analyzer = CVAnalyzer()
 
-    def search(self, query: str, num_results: int = 8, raw_role: str = "", location: str = "") -> list:
-        """Executes search query against Google API or falls back to live web fetcher."""
-        # 1. Try Google Custom Search API if keys exist
-        if self.api_key and self.cx_id:
+    def scout_from_cv(self, pdf_file, location: str, work_style: str) -> dict:
+        cv_text = self.cv_analyzer.extract_text_from_pdf(pdf_file)
+        if not cv_text:
+            raise ValueError("Could not read text from the provided PDF.")
+
+        prompt = f"""
+        You are an elite AI recruitment matchmaker.
+        Analyze the candidate's CV to determine the absolute best job roles for them.
+        
+        Candidate Preferred Location: "{location}"
+        Candidate Work Style Preference: "{work_style}" (e.g., Remote, On-site, Hybrid)
+
+        CANDIDATE CV:
+        "{cv_text[:5000]}"
+
+        Task:
+        1. Identify the top 2 exact job titles this candidate is most qualified for right now.
+        2. Write a 1-sentence summary of the candidate's core professional identity.
+        3. Formulate 3 high-conversion Google Search Dorks targeting real job boards (LinkedIn, Greenhouse, Lever, local boards) for these roles, incorporating the location and work style.
+        4. Provide a primary Google search query.
+
+        Return strictly valid JSON:
+        {{
+            "detected_roles": ["Role 1", "Role 2"],
+            "candidate_summary": "string",
+            "primary_search_query": "string",
+            "search_dorks": ["dork1", "dork2", "dork3"]
+        }}
+        """
+
+        if self.client:
             try:
-                params = urllib.parse.urlencode({
-                    'key': self.api_key,
-                    'cx': self.cx_id,
-                    'q': query,
-                    'num': min(num_results, 10)
-                })
-                url = f"https://www.googleapis.com/customsearch/v1?{params}"
-                req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-                with urllib.request.urlopen(req) as response:
-                    data = json.loads(response.read().decode())
-                
-                results = []
-                for item in data.get('items', []):
-                    results.append({
-                        'title': item.get('title'),
-                        'link': item.get('link'),
-                        'snippet': item.get('snippet')
-                    })
-                if results:
-                    return results
+                response = self.client.models.generate_content(
+                    model='gemini-3.1-flash-lite',
+                    contents=prompt,
+                    config=types.GenerateContentConfig(response_mime_type="application/json")
+                )
+                ai_data = json.loads(response.text)
             except Exception as e:
-                logger.error(f"Google Custom Search API error: {e}")
+                logger.error(f"AutoScout Gemini error: {e}")
+                ai_data = self._fallback_data(location, work_style)
+        else:
+            ai_data = self._fallback_data(location, work_style)
 
-        # 2. Try Live Web Search with original query/dork
-        results = self._live_web_search(query, max_results=num_results)
+        # Execute Search based on AI determination
+        primary_role = ai_data["detected_roles"][0] if ai_data["detected_roles"] else "Professional"
+        search_query = ai_data.get("primary_search_query", f"{primary_role} {location} {work_style} job")
         
-        # 3. If dork returned 0 results, retry with cleaned keywords
-        if not results:
-            clean_query = re.sub(r'site:[^\s]+', '', query).replace('"', '').strip()
-            clean_query = f"{clean_query} job vacancy hiring"
-            results = self._live_web_search(clean_query, max_results=num_results)
+        jobs = self.search_service.search(
+            query=search_query,
+            num_results=12,
+            raw_role=primary_role,
+            location=location
+        )
 
-        # 4. Localized direct job board generator if web engine is blocked
-        if not results:
-            results = self._generate_direct_job_board_links(raw_role or query, location)
+        return {
+            "ai_analysis": ai_data,
+            "jobs": jobs,
+            "cv_text_snippet": cv_text[:1000] # Kept for faster subsequent single-job analysis
+        }
 
-        return results
-
-    def _live_web_search(self, query: str, max_results: int = 8) -> list:
-        """Parses real live web search results directly."""
-        try:
-            encoded_query = urllib.parse.quote(query)
-            # Use DuckDuckGo HTML POST for higher reliability
-            data_bytes = urllib.parse.urlencode({'q': query}).encode('utf-8')
-            
-            req = urllib.request.Request(
-                'https://html.duckduckgo.com/html/',
-                data=data_bytes,
-                headers={
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-                }
-            )
-            
-            with urllib.request.urlopen(req, timeout=8) as response:
-                html_content = response.read().decode('utf-8', errors='ignore')
-
-            results = []
-            # Extract links and snippets from DDG HTML
-            items = re.findall(r'<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', html_content, re.DOTALL)
-            snippets = re.findall(r'<a[^>]*class="result__snippet"[^>]*>(.*?)</a>', html_content, re.DOTALL)
-
-            for idx, (link, raw_title) in enumerate(items[:max_results]):
-                if '/uddg=' in link:
-                    actual_link = urllib.parse.unquote(link.split('/uddg=')[1].split('&')[0])
-                else:
-                    actual_link = link
-
-                clean_title = unescape(re.sub(r'<[^>]+>', '', raw_title)).strip()
-                
-                snippet_text = ""
-                if idx < len(snippets):
-                    snippet_text = unescape(re.sub(r'<[^>]+>', '', snippets[idx])).strip()
-
-                if actual_link.startswith('http') and clean_title:
-                    results.append({
-                        "title": clean_title,
-                        "link": actual_link,
-                        "snippet": snippet_text if snippet_text else f"Live job listing found on {actual_link}"
-                    })
-
-            return results
-        except Exception as e:
-            logger.error(f"Live web search engine error: {e}")
-            return []
-
-    def _generate_direct_job_board_links(self, role: str, location: str) -> list:
-        """Constructs targeted direct job search links when external scrapers hit rate limits."""
-        role_clean = role.replace('"', '').strip()
-        loc_clean = location.replace('"', '').strip() if location else ""
-        
-        q_param = urllib.parse.quote(f"{role_clean} {loc_clean}".strip())
-        role_param = urllib.parse.quote(role_clean)
-        loc_param = urllib.parse.quote(loc_clean)
-
-        base_results = [
-            {
-                "title": f"LinkedIn Jobs: {role_clean} ({loc_clean or 'Worldwide'})",
-                "link": f"https://www.linkedin.com/jobs/search/?keywords={role_param}&location={loc_param}",
-                "snippet": f"Explore live hiring listings and direct employer applications for {role_clean} in {loc_clean or 'global locations'} on LinkedIn."
-            },
-            {
-                "title": f"Glassdoor: {role_clean} Openings",
-                "link": f"https://www.glassdoor.com/Job/jobs.htm?sc.keyword={role_param}",
-                "snippet": f"View salary ranges, company reviews, and active job postings for {role_clean}."
-            },
-            {
-                "title": f"Indeed Career Portal: {role_clean}",
-                "link": f"https://www.indeed.com/jobs?q={role_param}&l={loc_param}",
-                "snippet": f"Search thousands of active job vacancies and immediate openings for {role_clean}."
-            }
-        ]
-
-        # Add region-specific top portals if searching in Nepal
-        if 'nepal' in loc_clean.lower() or 'kathmandu' in loc_clean.lower():
-            base_results.insert(0, {
-                "title": f"Merojob Nepal: {role_clean} Vacancies",
-                "link": f"https://merojob.com/search/?q={role_param}",
-                "snippet": f"Top rated Nepalese career portal listings for {role_clean} roles across Kathmandu and nationwide."
-            })
-            base_results.insert(1, {
-                "title": f"JobsNepal: {role_clean} Hiring",
-                "link": f"https://www.jobsnepal.com/search?q={role_param}",
-                "snippet": f"Active job openings, immediate vacancies, and employer contacts in Nepal for {role_clean}."
-            })
-
-        return base_results
+    def _fallback_data(self, location, work_style):
+        return {
+            "detected_roles": ["General Professional"],
+            "candidate_summary": "Parsed successfully, but AI extraction failed or is offline.",
+            "primary_search_query": f"Job vacancies {location} {work_style}",
+            "search_dorks": [f"site:linkedin.com/jobs {location} {work_style}"]
+        }
